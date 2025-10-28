@@ -33,16 +33,16 @@ msystem: MINGW64
 update: true
 # Replaces uxplay dependencies with shairport-sync dependencies
 install: >-
-git
-base-devel
-mingw-w64-x86_64-toolchain
-mingw-w64-x86_64-autotools
-mingw-w64-x86_64-pkg-config
-mingw-w64-x86_64-libconfig
-mingw-w64-x86_64-popt
-mingw-w64-x86_64-openssl
-mingw-w64-x86_64-libsoxr
-mingw-w64-x86_64-libao
+  git
+  base-devel
+  mingw-w64-x86_64-toolchain
+  mingw-w64-x86_64-autotools
+  mingw-w64-x86_64-pkg-config
+  mingw-w64-x86_64-libconfig
+  mingw-w64-x86_64-popt
+  mingw-w64-x86_64-openssl
+  mingw-w64-x86_64-libsoxr
+  mingw-w64-x86_64-libao
 
 # --- Phase 1: Core Program Compilation ---
 - name: Compile shairport-sync and create Bonjour lib
