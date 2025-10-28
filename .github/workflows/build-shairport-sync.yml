@@ -13,14 +13,16 @@ jobs:
       - name: 'START: Checkout repository'
         uses: actions/checkout@v4
 
-      - name: 'START: Download and install Inno Setup'
+      # --- FIX IMPLEMENTED HERE ---
+      # Removed the 'winget install' command.
+      # The runner already has Inno Setup; we just need to add it to the PATH.
+      - name: 'START: Add Inno Setup to PATH'
         shell: pwsh
         run: |
-          echo "--- Starting Inno Setup installation ---"
-          winget install --id JRSoftware.InnoSetup -e --source winget --accept-package-agreements --accept-source-agreements
-          echo "Adding Inno Setup to PATH..."
+          echo "--- Inno Setup is pre-installed. Adding to PATH... ---"
           echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          echo "--- Inno Setup installation complete ---"
+          echo "--- Inno Setup PATH set. ---"
+      # --------------------------
 
       # --- Phase 1: Bonjour SDK Preparation ---
       - name: 'START: Download mDNSResponder libraries'
@@ -54,7 +56,6 @@ jobs:
 
       # --- Phase 1: Core Program Compilation ---
       - name: 'RUN: Compile shairport-sync and create Bonjour lib'
-        # This script already has good logging, so we just let it run
         shell: msys2 {0}
         run: |
           set -eo pipefail
