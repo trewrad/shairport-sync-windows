@@ -54,78 +54,46 @@ jobs:
             mingw-w64-x86_64-libsoxr
             mingw-w64-x86_64-libao
 
-      # --- Phase 1: Core Program Compilation ---
-      - name: 'RUN: Compile shairport-sync and create Bonjour lib'
-        shell: msys2 {0}
-        run: |
-          set -eo pipefail
-
-          echo "--- (1) Creating MinGW import library for Bonjour dnssd.dll ---"
-          cd mDNSResponder
-          gendef bin/dnssd.dll
-          dlltool -k -d dnssd.def -l lib/libdnssd.a
-          echo "--- libdnssd.a created successfully ---"
-          cd ..
-
-          echo "--- (2) Cloning shairport-sync repository ---"
-          git clone https://github.com/mikebrady/shairport-sync.git
-          cd shairport-sync
-
-          echo "--- (3) Running autoreconf ---"
-          autoreconf -fi
-
-          echo "--- (4) Configuring shairport-sync build ---"
-          PKG_CONFIG_PATH=/mingw64/lib/pkgconfig \
-          CPPFLAGS="-I../mDNSResponder/mDNSCore/Client" \
-          LDFLAGS="-L../mDNSResponder/lib" \
-          ./configure --prefix=/mingw64 \
-          --with-ssl=openssl \
-          --with-ao \
-          --with-soxr \
-          --with-dns_sd \
-          --without-avahi \
-          --without-tinysvcmdns \
-          --without-systemd \
-          --without-alsa \
-          --without-pulse \
-          --without-libdaemon
-
-          echo "--- (5) Compiling shairport-sync.exe ---"
-          make
-
-          echo "--- (6) Installing to /mingw64/bin ---"
-          make install
-
-          echo "--- Build complete ---"
-
-      - name: 'START: Prune compilation artifact directory'
+      # --- Phase 1: Bonjour SDK Preparation ---
+      - name: 'START: Download and Install Bonjour SDK'
         shell: pwsh
         run: |
-          echo "--- Starting artifact pruning ---"
-          $dllList = Get-Content -Path "dll-libs-list.txt"
-          $msysBinPath = "$env:GITHUB_WORKSPACE\msys64\mingw64\bin"
-          $destPath = "$env:GITHUB_WORKSPACE\build"
-
-          New-Item -ItemType Directory -Force -Path $destPath
-          echo "Created build directory at $destPath"
-
-          foreach ($file in $dllList) {
-            if ([string]::IsNullOrWhiteSpace($file) -or $file.StartsWith("#")) {
-              continue
-            }
-
-            $sourceFile = Join-Path $msysBinPath $file
-            $foundFile = Get-Item $sourceFile -ErrorAction SilentlyContinue
-
-            if ($foundFile) {
-              echo "Copying $($foundFile.Name) to $destPath"
-              Copy-Item -Path $foundFile.FullName -Destination $destPath
-            } else {
-              echo "Error: Required file $file not found in $msysBinPath"
-              exit 1
-            }
+          echo "--- Starting Bonjour SDK preparation ---"
+          echo "Downloading Bonjour SDK Setup (Requires Authentication Cookies)..."
+          
+          # --- FIX IMPLEMENTED HERE ---
+          # Define Headers as a HashTable
+          $headers = @{
+              "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+              "Accept-Language" = "en-GB,en-US;q=0.9,en;q=0.8"
+              "Cache-Control" = "no-cache"
+              "Connection" = "keep-alive"
+              # The long cookie string from your curl command (-b) goes here
+              "Cookie" = "dssid2=075dd59c-ec75-4628-9896-d5210326a0ac; dssf=1; pxro=1; as_rumid=1731415048.634; geo=IN; s_fid=239B35EAE4AB749D-3FD807B5E8B64F4A; s_cc=true; dslang=GB-EN; site=GBR; acn01=fZrYpw3uoMHWKVvpyb2f3RF2LXBA6IOo+XJD8hO0ApOPNe68PmR9MyIACO6hWbMcWA==; myacinfo=DAWTKNV323952cf8084a204fb20ab2508441a07d02d38a86c26f9f55cb5dab1d46ab9329e2e8f432e01dadbb879d590717ce93665b7b85dc9e8c54148c12599811e9667945be435b981722549099c3e1d741612cb613c9aef212207c28e3811629f573cd862aae967eeb48529da86d607870d3e11ab7a713aa7108adab019fb9f978edc29987bd9bd8d48e4928f33a3b5f4d7e449db0d70774ad35e289b5a89906aadf599e21d95f2608919b86f21cfaebefbcc659579e83e35c38c27b10231e83aff2aa8aaba572e5b58d02ea6cafdc5b1b1524bc88aa11903b20d3f5a483953db1357a4adf31c37622ba707115f348fa1fc31e35750802cb65b8f11237edef6e2b704db2ba8ad7b1ea0dd5320008b88611fa69a01cf7821f1324061fe525aa9b2c7a2ad72d2001a74a59f1bed917a237af802ea9931799d47c7a9bd701ac0e429663137c6037113db9de08805bbcd22d077c5b464550df0a4babd9ecc747a8033a90d8282eb8d41643455583809bee3e9ec83867b27297cd87c75a40e5e0293d109e3cb22cb8a18285d6ec1409e51fe43729deb516f0ab39d1f20bdbbb627a8cc99eb119841ad45b8fe89e8b345b18a1085c1a2800ea6a77c2982b42d70bda8ad92ecf9f117c4e0b802b016395f27e1b46fc74c5b1749a8a9132a9f97189d311c465799859d42abcbb7159daad961282f25b620875585a47V3; aidshd=AY+Noh5N+NPOfsGl4WM1NDYxNTIyLWFjZjMtNGIwMC1iODJmLTE1MmM5ZWYxNGNlZkeyS4j8l5G8BOqS+8wflfX/dXI6XVB1GJXoukUnbQvTFSIyoFzMmFFFlFi/l9gAVOCgljPxfoyJ/J8skevGvc3h4+uYn4UMTs4ZGU/T7bQsDbcBSVY5JUjqlXrxSZOoPYfV/8fhlBKqUQBiQzg9h2LdijzXLLN2+aZ5s4FTU+kCITpcVv2nsIhxJm+mieqcqQGXLXW5dN12tE3SXzV3GbbLKIidtSCGo47SXBw037A/QTfiKyUPIiAmRNy9p5XCrYZWSFvn+XJxYBQtKUpPiPtMbqCmZgDXdXjNqwEkISRuCGQUb0yvMj0dlsONxiqCYzPHXL+44cMVLjbFbCiZxMdds5K+oUUwHvxRWZlWgQzlOTBpsRd0DrEyH8zuQgZpDcykibou7BhZ+IsXJyxc4iLy8cAZZUxshM6Jt5lrdFktZVtMOxLDCtUswr+klLx0peI16+QeZ1dSsVWDdNyQBYk30hxu1EI/HWvvDNxE21RHOovDWav2c2YpnHfFBA5icKJ5oo566FVGOVHBBRPgnkrjHSXR4CMMdigVQP+PSjVoVVYLGq96kcvfZvTC+PuAoMxCKNOI6BkNQsmJslz3fWUc4kOs2F7UfI5cxvqp4odK5J0iZQ7VluqiZEO0frdHSATfFU8D5g4GyAaCJhBypFt3mYYGcMoPK15khlYIlp1+umjlquOFTzAUX4FR5h4GyZ1xBtvz/wYhLAVH3peS1pa6GJhfQjBfl5sV85CxdfQ=; s_pathLength=developer^%^3D2^%^2C; DSESSIONID=m0155tsappimtarbs8gsunnk4bbjrmnh0f051vt9ju69bvehf7u; ADCDownloadAuth=8rKUabtU2aJJUR2dTc6i58HkXX5UW9N^%^2FI8R77E5R1uEMRH6QMeCoeksNZh4cV64Hqiyr0gfKm1Ft^%^0D^%^0AhUtOGlcHT^%^2FjuiPlG^%^2BPcVajl44Qf0BXNd1b7R^%^2Flap1Tk^%^2BTr4mrZOfV9B^%^2FrdOrv4D8Pg3iT47qWQqj^%^0D^%^0AROKiHVNPTPJ2nP8qEFvW9BRA^%^0D^%^0A; s_sq=^%^5B^%^5BB^%^5D^%^5D"
+              "Pragma" = "no-cache"
+              "Referer" = "https://developer.apple.com/"
+              "Sec-Fetch-Dest" = "document"
+              "Sec-Fetch-Mode" = "navigate"
+              "Sec-Fetch-Site" = "same-site"
+              "Sec-Fetch-User" = "?1"
+              "Upgrade-Insecure-Requests" = "1"
+              "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+              "sec-ch-ua" = "`"Google Chrome`";v=`"141`", `"Not?A_Brand`";v=`"8`", `"Chromium`";v=`"141`"" # Escaped quotes with backticks `
+              "sec-ch-ua-mobile" = "?0"
+              "sec-ch-ua-platform" = "`"Windows`"" # Escaped quotes with backticks `
           }
-          echo "--- Artifact pruning complete ---"
+          
+          # Use Invoke-WebRequest with the URI and Headers
+          Invoke-WebRequest -Uri "https://download.developer.apple.com/Developer_Tools/bonjour_sdk_for_windows_v3.0/bonjoursdksetup.exe" -Headers $headers -OutFile "bonjoursdksetup.exe"
+          # --------------------------
+
+          echo "Installing Bonjour SDK silently..."
+          Start-Process -FilePath ".\bonjoursdksetup.exe" -ArgumentList "/qn /norestart" -Wait -PassThru
+
+          echo "Cleaning up installer..."
+          Remove-Item -Path "bonjoursdksetup.exe" -Force
+
+          echo "--- Bonjour SDK installation complete ---"
 
       # --- Phase 2: Python Tray Wrapper ---
       - name: 'START: Set up Python'
