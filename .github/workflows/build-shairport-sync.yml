@@ -1,0 +1,150 @@
+name: Build shairport-sync-windows
+
+on:
+push:
+branches: [ "main" ]
+workflow_dispatch:
+
+jobs:
+build:
+runs-on: windows-latest
+
+steps:
+- name: Checkout repository
+uses: actions/checkout@v4
+
+- name: Download and install Inno Setup
+# Reuses the standard Inno Setup action
+uses: crazy-max/ghaction-setup-inno@v3
+
+# --- Phase 1: Bonjour SDK Preparation ---
+- name: Download mDNSResponder libraries
+# Reuses the uxplay-windows model for fetching Bonjour
+shell: pwsh
+run: |
+Invoke-WebRequest -Uri "https://github.com/leapbtw/Bonjour-SDK-Windows/archive/refs/tags/2.0.2.zip" -OutFile "bonjour.zip"
+Expand-Archive -Path "bonjour.zip" -DestinationPath "."
+Move-Item -Path "Bonjour-SDK-Windows-2.0.2" -Destination "mDNSResponder"
+
+- name: Setup MSYS2
+uses: msys2/setup-msys2@v2
+with:
+msystem: MINGW64
+update: true
+# Replaces uxplay dependencies with shairport-sync dependencies
+install: >-
+git
+base-devel
+mingw-w64-x86_64-toolchain
+mingw-w64-x86_64-autotools
+mingw-w64-x86_64-pkg-config
+mingw-w64-x86_64-libconfig
+mingw-w64-x86_64-popt
+mingw-w64-x86_64-openssl
+mingw-w64-x86_64-libsoxr
+mingw-w64-x86_64-libao
+
+# --- Phase 1: Core Program Compilation ---
+- name: Compile shairport-sync and create Bonjour lib
+# Replaces the 'compiling uxplay' step with the script from Phase 1.3
+shell: msys2 {0}
+run: |
+set -eo pipefail
+
+echo "--- (1) Creating MinGW import library for Bonjour dnssd.dll ---"
+cd mDNSResponder
+gendef bin/dnssd.dll
+dlltool -k -d dnssd.def -l lib/libdnssd.a
+echo "--- libdnssd.a created successfully ---"
+cd..
+
+echo "--- (2) Cloning shairport-sync repository ---"
+git clone https://github.com/mikebrady/shairport-sync.git
+cd shairport-sync
+
+echo "--- (3) Running autoreconf ---"
+autoreconf -fi
+
+echo "--- (4) Configuring shairport-sync build ---"
+PKG_CONFIG_PATH=/mingw64/lib/pkgconfig \
+CPPFLAGS="-I../mDNSResponder/mDNSCore/Client" \
+LDFLAGS="-L../mDNSResponder/lib" \
+./configure --prefix=/mingw64 \
+--with-ssl=openssl \
+--with-ao \
+--with-soxr \
+--with-dns_sd \
+--without-avahi \
+--without-tinysvcmdns \
+--without-systemd \
+--without-alsa \
+--without-pulse \
+--without-libdaemon
+
+echo "--- (5) Compiling shairport-sync.exe ---"
+make
+
+echo "--- (6) Installing to /mingw64/bin ---"
+make install
+
+echo "--- Build complete ---"
+
+- name: Prune compilation artifact directory
+# Reuses the uxplay-windows pruning model
+# This script reads dll-libs-list.txt (from Phase 1.4) and copies
+# all listed files from the MSYS2 bin dir to a staging 'build' dir.
+shell: pwsh
+run: |
+$dllList = Get-Content -Path "dll-libs-list.txt"
+$msysBinPath = "$env:GITHUB_WORKSPACE\msys64\mingw64\bin"
+$destPath = "$env:GITHUB_WORKSPACE\build"
+
+New-Item -ItemType Directory -Force -Path $destPath
+
+foreach ($file in $dllList) {
+if ([string]::IsNullOrWhiteSpace($file) -or $file.StartsWith("#")) {
+continue
+}
+
+$sourceFile = Join-Path $msysBinPath $file
+$foundFile = Get-Item $sourceFile -ErrorAction SilentlyContinue
+
+if ($foundFile) {
+echo "Copying $($foundFile.Name) to $destPath"
+Copy-Item -Path $foundFile.FullName -Destination $destPath
+} else {
+echo "Error: Required file $file not found in $msysBinPath"
+exit 1
+}
+}
+
+# --- Phase 2: Python Tray Wrapper ---
+- name: Set up Python
+uses: actions/setup-python@v5
+with:
+python-version: '3.11'
+
+- name: Install Python dependencies
+# Reuses the standard Python/PyInstaller steps
+run: pip install pyinstaller pystray pillow
+
+- name: Build the Python wrapper
+run: |
+pyinstaller --onefile --windowed --name shairport-sync-windows tray/tray.py
+# pyinstaller --onefile --windowed --icon=icon.ico --name shairport-sync-windows tray/tray.py
+# copy icon.ico dist\icon.ico
+
+# --- Phase 3: Inno Setup Installer ---
+- name: Compile the installer with Inno Setup
+# Reuses the standard Inno Setup compile step
+shell: pwsh
+run: |
+iscc "inno-setup/script.iss"
+
+# --- Upload Artifact ---
+- name: Upload artifact
+# Reuses the standard upload step
+uses: actions/upload-artifact@v4
+with:
+name: shairport-sync-windows
+path: inno-setup/Output/shairport-sync-windows-setup.exe
