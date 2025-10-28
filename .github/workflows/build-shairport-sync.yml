@@ -112,7 +112,6 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          # FIX IMPLEMENTED HERE: Removed the problematic comment
           install: >-
             git
             base-devel
@@ -124,17 +123,23 @@ jobs:
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-libsoxr
             mingw-w64-x86_64-libao
-          # -----------------------------------------------
 
       # --- Phase 1: Core Program Compilation ---
       - name: 'RUN: Compile shairport-sync'
         shell: msys2 {0}
         run: |
-          set -eo pipefail
+          set -eo pipefail # Keep this to exit on hard errors
+
+          # --- FIX 1: Explicitly update MSYS2 environment ---
+          echo "--- Updating MSYS2 environment ---"
+          pacman -Syu --noconfirm --needed || { echo "::error::Failed to update MSYS2 environment"; exit 1; }
+          echo "--- MSYS2 environment updated ---"
+          # -----------------------------------------------
 
           echo "--- (2) Cloning shairport-sync repository ---"
-          git clone https://github.com/mikebrady/shairport-sync.git ../shairport-sync-source
-          cd ../shairport-sync-source
+          # Clone into a subdirectory to keep workspace cleaner
+          git clone https://github.com/mikebrady/shairport-sync.git shairport-sync-source
+          cd shairport-sync-source
 
           echo "--- (3) Running autoreconf ---"
           autoreconf -fi
@@ -153,7 +158,18 @@ jobs:
           --without-systemd \
           --without-alsa \
           --without-pulse \
-          --without-libdaemon || { echo "::error::Configure script failed"; exit 1; }
+          --without-libdaemon
+          
+          # --- FIX 2: Check configure exit status and print config.log on error ---
+          CONFIGURE_EXIT_CODE=$?
+          if [ $CONFIGURE_EXIT_CODE -ne 0 ]; then
+            echo "::error::Configure script failed with exit code $CONFIGURE_EXIT_CODE."
+            echo "--- Contents of config.log ---"
+            cat config.log || echo "::warning::Could not display config.log."
+            echo "--- End of config.log ---"
+            exit $CONFIGURE_EXIT_CODE
+          fi
+          # ----------------------------------------------------------------------
 
           echo "--- (5) Compiling shairport-sync.exe ---"
           make || { echo "::error::Make failed"; exit 1; }
