@@ -1,0 +1,18 @@
+# This file lists all executables and essential DLLs
+# to be packaged by the Inno Setup installer.
+
+# 1. Core Executable (from 'make install')
+shairport-sync.exe
+
+# 2. Direct Dependencies (from MSYS2 pacman)
+libao-4.dll
+libconfig-11.dll
+libsoxr-0.dll
+libpopt-0.dll
+libssl-3-x64.dll
+libcrypto-3-x64.dll
+
+# 3. MSYS2/GCC Runtime Dependencies
+libgcc_s_seh-1.dll
+libwinpthread-1.dll
+libstdc++-6.dll
