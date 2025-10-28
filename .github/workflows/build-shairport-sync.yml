@@ -61,14 +61,12 @@ jobs:
         shell: pwsh
         run: |
           echo "Extracting Bonjour MSIs using 7-Zip..."
-          # Extract only the 64-bit MSIs needed
           & "C:\Program Files\7-Zip\7z.exe" x bonjoursdksetup.exe -o"." Bonjour64.msi BonjourSDK64.msi -y
           if ($LASTEXITCODE -ne 0) {
             echo "::error::Failed to extract MSIs from bonjoursdksetup.exe"
             exit 1
           }
           echo "MSIs extracted."
-          # Clean up the original exe now
           Remove-Item -Path "bonjoursdksetup.exe" -Force
 
       - name: 'STEP: Install Bonjour Runtime (64-bit)'
@@ -81,7 +79,6 @@ jobs:
           $process = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
           if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 = Success, Reboot Required
             echo "::error::Bonjour Runtime (Bonjour64.msi) installation failed with exit code $($process.ExitCode)."
-            # Output the log file content for debugging
             if (Test-Path $logPath) {
               echo "--- Start Bonjour Runtime Install Log ---"
               Get-Content $logPath | ForEach-Object { echo $_ }
@@ -101,7 +98,6 @@ jobs:
           $process = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
           if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 = Success, Reboot Required
             echo "::error::Bonjour SDK (BonjourSDK64.msi) installation failed with exit code $($process.ExitCode)."
-            # Output the log file content for debugging
             if (Test-Path $logPath) {
               echo "--- Start Bonjour SDK Install Log ---"
               Get-Content $logPath | ForEach-Object { echo $_ }
@@ -116,10 +112,11 @@ jobs:
         with:
           msystem: MINGW64
           update: true
+          # FIX IMPLEMENTED HERE: Removed the problematic comment
           install: >-
             git
             base-devel
-            mingw-w64-x86_64-toolchain # Includes gendef, dlltool
+            mingw-w64-x86_64-toolchain
             mingw-w64-x86_64-autotools
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-libconfig
@@ -127,6 +124,7 @@ jobs:
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-libsoxr
             mingw-w64-x86_64-libao
+          # -----------------------------------------------
 
       # --- Phase 1: Core Program Compilation ---
       - name: 'RUN: Compile shairport-sync'
@@ -135,7 +133,6 @@ jobs:
           set -eo pipefail
 
           echo "--- (2) Cloning shairport-sync repository ---"
-          # Clone outside of the current directory to avoid potential conflicts if workspace isn't clean
           git clone https://github.com/mikebrady/shairport-sync.git ../shairport-sync-source
           cd ../shairport-sync-source
 
@@ -143,8 +140,6 @@ jobs:
           autoreconf -fi
 
           echo "--- (4) Configuring shairport-sync build ---"
-          # Default SDK install path: C:\Program Files\Bonjour SDK
-          # MSYS2 path translation: /c/Program Files/Bonjour SDK
           PKG_CONFIG_PATH=/mingw64/lib/pkgconfig \
           CPPFLAGS="-I'/c/Program Files/Bonjour SDK/Include'" \
           LDFLAGS="-L'/c/Program Files/Bonjour SDK/Lib/amd64'" \
@@ -164,7 +159,6 @@ jobs:
           make || { echo "::error::Make failed"; exit 1; }
 
           echo "--- (6) Installing to /mingw64/bin ---"
-          # This copies the compiled exe and potentially libs to the MSYS2 environment's bin folder
           make install || { echo "::error::Make install failed"; exit 1; }
 
           echo "--- Shairport-sync build complete ---"
@@ -173,15 +167,14 @@ jobs:
         shell: pwsh
         run: |
           echo "--- Starting artifact pruning ---"
-          $dllListPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "dll-libs-list.txt" # Ensure correct path
+          $dllListPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "dll-libs-list.txt"
           if (-not (Test-Path -Path $dllListPath -PathType Leaf)) {
             echo "::error::$dllListPath not found or is not a file!"
             exit 1
           }
           $dllList = Get-Content -Path $dllListPath
-          # Source is where 'make install' put the files
           $msysBinPath = "$env:GITHUB_WORKSPACE\msys64\mingw64\bin"
-          $destPath = "$env:GITHUB_WORKSPACE\build" # Destination for the final bundle
+          $destPath = "$env:GITHUB_WORKSPACE\build"
 
           New-Item -ItemType Directory -Force -Path $destPath
           echo "Created/Ensured build directory exists at $destPath"
@@ -226,10 +219,8 @@ jobs:
       - name: 'START: Build the Python wrapper'
         run: |
           echo "--- Running PyInstaller... ---"
-          # Ensure the tray.py script is in the expected 'tray' subfolder relative to workspace root
           pyinstaller --onefile --windowed --name shairport-sync-windows tray/tray.py || { echo "::error::PyInstaller failed"; exit 1; }
           echo "--- PyInstaller build complete ---"
-          # Copy the built python exe to the 'build' dir for Inno Setup
           echo "Copying Python wrapper executable to build directory..."
           Copy-Item -Path "dist/shairport-sync-windows.exe" -Destination "$env:GITHUB_WORKSPACE\build\"
 
@@ -238,7 +229,6 @@ jobs:
         shell: pwsh
         run: |
           echo "--- Running Inno Setup Compiler (iscc)... ---"
-          # Make sure inno-setup/script.iss correctly references files in the 'build' directory
           iscc "inno-setup/script.iss" || { echo "::error::Inno Setup compilation failed"; exit 1; }
           echo "--- Inno Setup compilation complete ---"
 
@@ -247,5 +237,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: shairport-sync-windows
-          # Ensure the output path configured in script.iss matches here
           path: inno-setup/Output/shairport-sync-windows-setup.exe
