@@ -8,21 +8,28 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-
-    permissions:
-      contents: read
+    # REMOVED: The 'permissions:' block I added earlier was not needed.
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # --- FIX IMPLEMENTED HERE ---
+      # Replaced the non-existent 'crazy-max' action with a 'run' step
+      # that installs Inno Setup using the winget package manager
+      # and adds its compiler (iscc.exe) to the PATH.
       - name: Download and install Inno Setup
-        # Reuses the standard Inno Setup action
-        uses: crazy-max/ghaction-setup-inno@v3
+        shell: pwsh
+        run: |
+          echo "Installing Inno Setup..."
+          winget install --id JRSoftware.InnoSetup -e --source winget --accept-package-agreements --accept-source-agreements
+          echo "Adding Inno Setup to PATH..."
+          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # --------------------------
 
       # --- Phase 1: Bonjour SDK Preparation ---
       - name: Download mDNSResponder libraries
-        # Reuses the uxplay-windows model for fetching Bonjour
+        # (This step and all subsequent steps remain the same)
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri "https://github.com/leapbtw/Bonjour-SDK-Windows/archive/refs/tags/2.0.2.zip" -OutFile "bonjour.zip"
@@ -34,8 +41,6 @@ jobs:
         with:
           msystem: MINGW64
           update: true
-          # Replaces uxplay dependencies with shairport-sync dependencies
-          # CORRECTED: Replaced non-breaking spaces with regular spaces
           install: >-
             git
             base-devel
@@ -50,7 +55,6 @@ jobs:
 
       # --- Phase 1: Core Program Compilation ---
       - name: Compile shairport-sync and create Bonjour lib
-        # Replaces the 'compiling uxplay' step with the script from Phase 1.3
         shell: msys2 {0}
         run: |
           set -eo pipefail
@@ -94,9 +98,6 @@ jobs:
           echo "--- Build complete ---"
 
       - name: Prune compilation artifact directory
-        # Reuses the uxplay-windows pruning model
-        # This script reads dll-libs-list.txt (from Phase 1.4) and copies
-        # all listed files from the MSYS2 bin dir to a staging 'build' dir.
         shell: pwsh
         run: |
           $dllList = Get-Content -Path "dll-libs-list.txt"
@@ -129,7 +130,6 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        # Reuses the standard Python/PyInstaller steps
         run: pip install pyinstaller pystray pillow
 
       - name: Build the Python wrapper
@@ -140,14 +140,13 @@ jobs:
 
       # --- Phase 3: Inno Setup Installer ---
       - name: Compile the installer with Inno Setup
-        # Reuses the standard Inno Setup compile step
+        # This step will now work because 'iscc' is in the PATH
         shell: pwsh
         run: |
           iscc "inno-setup/script.iss"
 
       # --- Upload Artifact ---
       - name: Upload artifact
-        # Reuses the standard upload step
         uses: actions/upload-artifact@v4
         with:
           name: shairport-sync-windows
