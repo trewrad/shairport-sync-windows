@@ -77,7 +77,7 @@ jobs:
           $logPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "bonjour64_install.log"
           $arguments = "/i `"$msiPath`" /qn /norestart /L*v `"$logPath`""
           $process = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
-          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 = Success, Reboot Required
+          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
             echo "::error::Bonjour Runtime (Bonjour64.msi) installation failed with exit code $($process.ExitCode)."
             if (Test-Path $logPath) {
               echo "--- Start Bonjour Runtime Install Log ---"
@@ -96,7 +96,7 @@ jobs:
           $logPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "bonjoursdk64_install.log"
           $arguments = "/i `"$msiPath`" /qn /norestart /L*v `"$logPath`""
           $process = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
-          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 = Success, Reboot Required
+          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) {
             echo "::error::Bonjour SDK (BonjourSDK64.msi) installation failed with exit code $($process.ExitCode)."
             if (Test-Path $logPath) {
               echo "--- Start Bonjour SDK Install Log ---"
@@ -130,14 +130,18 @@ jobs:
         run: |
           set -eo pipefail # Keep this to exit on hard errors
 
-          # --- FIX 1: Explicitly update MSYS2 environment ---
           echo "--- Updating MSYS2 environment ---"
           pacman -Syu --noconfirm --needed || { echo "::error::Failed to update MSYS2 environment"; exit 1; }
-          echo "--- MSYS2 environment updated ---"
-          # -----------------------------------------------
+          
+          # --- FIX 1: Force reinstall GCC ---
+          echo "--- Ensuring mingw-w64-x86_64-gcc is installed ---"
+          pacman -S --noconfirm --needed mingw-w64-x86_64-gcc || { echo "::error::Failed to install/reinstall GCC"; exit 1; }
+          # --- FIX 2: Verify GCC ---
+          echo "--- Verifying GCC ---"
+          gcc --version || { echo "::error::GCC command not found or not working"; exit 1; }
+          # -------------------------
 
           echo "--- (2) Cloning shairport-sync repository ---"
-          # Clone into a subdirectory to keep workspace cleaner
           git clone https://github.com/mikebrady/shairport-sync.git shairport-sync-source
           cd shairport-sync-source
 
@@ -160,7 +164,7 @@ jobs:
           --without-pulse \
           --without-libdaemon
           
-          # --- FIX 2: Check configure exit status and print config.log on error ---
+          # --- FIX 3: Ensure config.log is printed on error ---
           CONFIGURE_EXIT_CODE=$?
           if [ $CONFIGURE_EXIT_CODE -ne 0 ]; then
             echo "::error::Configure script failed with exit code $CONFIGURE_EXIT_CODE."
@@ -169,7 +173,7 @@ jobs:
             echo "--- End of config.log ---"
             exit $CONFIGURE_EXIT_CODE
           fi
-          # ----------------------------------------------------------------------
+          # --------------------------------------------------
 
           echo "--- (5) Compiling shairport-sync.exe ---"
           make || { echo "::error::Make failed"; exit 1; }
