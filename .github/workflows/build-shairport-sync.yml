@@ -14,8 +14,10 @@ steps:
 uses: actions/checkout@v4
 
 - name: Download and install Inno Setup
-# Reuses the standard Inno Setup action
-uses: crazy-max/ghaction-setup-inno@v3
+  shell: pwsh
+  run: |
+    Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile "is.exe"
+    Start-Process -FilePath "is.exe" -ArgumentList "/VERYSILENT" -Wait
 
 # --- Phase 1: Bonjour SDK Preparation ---
 - name: Download mDNSResponder libraries
@@ -126,10 +128,9 @@ pyinstaller --onefile --windowed --name shairport-sync-windows tray/tray.py
 
 # --- Phase 3: Inno Setup Installer ---
 - name: Compile the installer with Inno Setup
-# Reuses the standard Inno Setup compile step
-shell: pwsh
-run: |
-iscc "inno-setup/script.iss"
+  shell: pwsh
+  run: |
+    & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "inno-setup/script.iss"
 
 # --- Upload Artifact ---
 - name: Upload artifact
