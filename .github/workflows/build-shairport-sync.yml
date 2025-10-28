@@ -8,36 +8,40 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    # REMOVED: The 'permissions:' block I added earlier was not needed.
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: START: Checkout repository
+        run: echo "Starting checkout..."
+      - uses: actions/checkout@v4
+      - name: END: Checkout repository
+        run: echo "Checkout complete."
 
-      # --- FIX IMPLEMENTED HERE ---
-      # Replaced the non-existent 'crazy-max' action with a 'run' step
-      # that installs Inno Setup using the winget package manager
-      # and adds its compiler (iscc.exe) to the PATH.
-      - name: Download and install Inno Setup
+      - name: START: Download and install Inno Setup
         shell: pwsh
         run: |
-          echo "Installing Inno Setup..."
+          echo "Starting Inno Setup installation..."
           winget install --id JRSoftware.InnoSetup -e --source winget --accept-package-agreements --accept-source-agreements
           echo "Adding Inno Setup to PATH..."
           echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      # --------------------------
+      - name: END: Download and install Inno Setup
+        run: echo "Inno Setup installation complete."
 
       # --- Phase 1: Bonjour SDK Preparation ---
-      - name: Download mDNSResponder libraries
-        # (This step and all subsequent steps remain the same)
+      - name: START: Download mDNSResponder libraries
         shell: pwsh
         run: |
+          echo "Downloading Bonjour SDK..."
           Invoke-WebRequest -Uri "https://github.com/leapbtw/Bonjour-SDK-Windows/archive/refs/tags/2.0.2.zip" -OutFile "bonjour.zip"
+          echo "Extracting Bonjour SDK..."
           Expand-Archive -Path "bonjour.zip" -DestinationPath "."
+          echo "Moving Bonjour SDK to mDNSResponder directory..."
           Move-Item -Path "Bonjour-SDK-Windows-2.0.2" -Destination "mDNSResponder"
+      - name: END: Download mDNSResponder libraries
+        run: echo "Bonjour SDK preparation complete."
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
+      - name: START: Setup MSYS2
+        run: echo "Installing MSYS2 and dependencies..."
+      - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
@@ -52,11 +56,15 @@ jobs:
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-libsoxr
             mingw-w64-x86_64-libao
+      - name: END: Setup MSYS2
+        run: echo "MSYS2 setup complete."
 
       # --- Phase 1: Core Program Compilation ---
-      - name: Compile shairport-sync and create Bonjour lib
+      - name: START: Compile shairport-sync and create Bonjour lib
         shell: msys2 {0}
         run: |
+          # This script already has good logging, so we just wrap it.
+          echo "--- Starting shairport-sync compilation script ---"
           set -eo pipefail
 
           echo "--- (1) Creating MinGW import library for Bonjour dnssd.dll ---"
@@ -95,16 +103,20 @@ jobs:
           echo "--- (6) Installing to /mingw64/bin ---"
           make install
 
-          echo "--- Build complete ---"
+          echo "--- shairport-sync compilation script complete ---"
+      - name: END: Compile shairport-sync and create Bonjour lib
+        run: echo "Shairport-sync compilation step finished."
 
-      - name: Prune compilation artifact directory
+      - name: START: Prune compilation artifact directory
         shell: pwsh
         run: |
+          echo "Starting artifact pruning..."
           $dllList = Get-Content -Path "dll-libs-list.txt"
           $msysBinPath = "$env:GITHUB_WORKSPACE\msys64\mingw64\bin"
           $destPath = "$env:GITHUB_WORKSPACE\build"
 
           New-Item -ItemType Directory -Force -Path $destPath
+          echo "Created build directory at $destPath"
 
           foreach ($file in $dllList) {
             if ([string]::IsNullOrWhiteSpace($file) -or $file.StartsWith("#")) {
@@ -122,32 +134,49 @@ jobs:
               exit 1
             }
           }
+      - name: END: Prune compilation artifact directory
+        run: echo "Artifact pruning complete."
 
       # --- Phase 2: Python Tray Wrapper ---
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: START: Set up Python
+        run: echo "Setting up Python 3.11..."
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: END: Set up Python
+        run: echo "Python setup complete."
 
-      - name: Install Python dependencies
-        run: pip install pyinstaller pystray pillow
-
-      - name: Build the Python wrapper
+      - name: START: Install Python dependencies
         run: |
+          echo "Installing PyInstaller, pystray, and pillow..."
+          pip install pyinstaller pystray pillow
+      - name: END: Install Python dependencies
+        run: echo "Python dependencies installed."
+
+      - name: START: Build the Python wrapper
+        run: |
+          echo "Running PyInstaller..."
           pyinstaller --onefile --windowed --name shairport-sync-windows tray/tray.py
           # pyinstaller --onefile --windowed --icon=icon.ico --name shairport-sync-windows tray/tray.py
           # copy icon.ico dist\icon.ico
+      - name: END: Build the Python wrapper
+        run: echo "PyInstaller build complete."
 
       # --- Phase 3: Inno Setup Installer ---
-      - name: Compile the installer with Inno Setup
-        # This step will now work because 'iscc' is in the PATH
+      - name: START: Compile the installer with Inno Setup
         shell: pwsh
         run: |
+          echo "Running Inno Setup Compiler (iscc)..."
           iscc "inno-setup/script.iss"
+      - name: END: Compile the installer with Inno Setup
+        run: echo "Inno Setup compilation complete."
 
       # --- Upload Artifact ---
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: START: Upload artifact
+        run: echo "Uploading artifact..."
+      - uses: actions/upload-artifact@v4
         with:
           name: shairport-sync-windows
           path: inno-setup/Output/shairport-sync-windows-setup.exe
+      - name: END: Upload artifact
+        run: echo "Artifact upload complete."
