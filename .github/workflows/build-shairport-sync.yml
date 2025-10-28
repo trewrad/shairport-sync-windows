@@ -21,28 +21,22 @@ jobs:
           echo "--- Inno Setup PATH set. ---"
 
       # --- Phase 1: Bonjour SDK Preparation ---
-      - name: 'START: Download and Install Bonjour SDK'
-        # Define env var to hold the secret cookie
+      - name: 'START: Download Bonjour SDK Installer'
         env:
           APPLE_AUTH_COOKIE: ${{ secrets.APPLE_AUTH_COOKIE }}
         shell: pwsh
         run: |
-          echo "--- Starting Bonjour SDK preparation ---"
-          echo "Downloading Bonjour SDK Setup (Requires Authentication Cookies)..."
-
-          # Check if the secret is empty/missing
+          echo "--- Starting Bonjour SDK Download ---"
           if ([string]::IsNullOrWhiteSpace($env:APPLE_AUTH_COOKIE)) {
-            echo "::error::APPLE_AUTH_COOKIE secret is not set or empty. Please configure it in repository settings."
+            echo "::error::APPLE_AUTH_COOKIE secret is not set or empty."
             exit 1
           }
-
-          # Define Headers using the cookie from secrets
           $headers = @{
               "Accept" = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
               "Accept-Language" = "en-GB,en-US;q=0.9,en;q=0.8"
               "Cache-Control" = "no-cache"
               "Connection" = "keep-alive"
-              "Cookie" = $env:APPLE_AUTH_COOKIE # Use the cookie from the secret
+              "Cookie" = $env:APPLE_AUTH_COOKIE
               "Pragma" = "no-cache"
               "Referer" = "https://developer.apple.com/"
               "Sec-Fetch-Dest" = "document"
@@ -51,44 +45,71 @@ jobs:
               "Sec-Fetch-User" = "?1"
               "Upgrade-Insecure-Requests" = "1"
               "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-              # Add sec-ch headers if required, escaping quotes with backticks `
               "sec-ch-ua" = "`"Google Chrome`";v=`"141`", `"Not?A_Brand`";v=`"8`", `"Chromium`";v=`"141`""
               "sec-ch-ua-mobile" = "?0"
               "sec-ch-ua-platform" = "`"Windows`""
           }
-
-          # Attempt the download
           try {
             Invoke-WebRequest -Uri "https://download.developer.apple.com/Developer_Tools/bonjour_sdk_for_windows_v3.0/bonjoursdksetup.exe" -Headers $headers -OutFile "bonjoursdksetup.exe" -ErrorAction Stop
             echo "Bonjour SDK downloaded successfully."
           } catch {
             echo "::error::Failed to download Bonjour SDK. Error: $($_.Exception.Message)"
-            # Optionally, output more details if needed, e.g., the response content if it's not the binary
-            # if ($_.Exception.Response) {
-            #   echo "Response Status Code: $($_.Exception.Response.StatusCode)"
-            #   # Be careful about logging full response content if it's large or sensitive
-            # }
             exit 1
           }
 
-          echo "Installing Bonjour SDK silently..."
-          # Start the installer and wait for it to finish. /qn makes it silent. /norestart prevents unexpected reboots.
-          $process = Start-Process -FilePath ".\bonjoursdksetup.exe" -ArgumentList "/qn /norestart" -Wait -PassThru
-          if ($process.ExitCode -ne 0) {
-             echo "::error::Bonjour SDK installation failed with exit code $($process.ExitCode)."
-             # Attempt to show log file if it exists (path might vary)
-             $logPath = Join-Path $env:TEMP "Bonjour*.log" # Common log location pattern
-             if (Test-Path $logPath) {
-               Get-Content $logPath | ForEach-Object { echo $_ }
-             }
-             exit 1
+      - name: 'STEP: Extract Bonjour MSIs'
+        shell: pwsh
+        run: |
+          echo "Extracting Bonjour MSIs using 7-Zip..."
+          # Extract only the 64-bit MSIs needed
+          & "C:\Program Files\7-Zip\7z.exe" x bonjoursdksetup.exe -o"." Bonjour64.msi BonjourSDK64.msi -y
+          if ($LASTEXITCODE -ne 0) {
+            echo "::error::Failed to extract MSIs from bonjoursdksetup.exe"
+            exit 1
           }
-          echo "Bonjour SDK installed successfully."
-
-          echo "Cleaning up installer..."
+          echo "MSIs extracted."
+          # Clean up the original exe now
           Remove-Item -Path "bonjoursdksetup.exe" -Force
 
-          echo "--- Bonjour SDK preparation complete ---"
+      - name: 'STEP: Install Bonjour Runtime (64-bit)'
+        shell: pwsh
+        run: |
+          echo "Installing Bonjour Runtime (Bonjour64.msi) silently with verbose logging..."
+          $msiPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "Bonjour64.msi"
+          $logPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "bonjour64_install.log"
+          $arguments = "/i `"$msiPath`" /qn /norestart /L*v `"$logPath`""
+          $process = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 = Success, Reboot Required
+            echo "::error::Bonjour Runtime (Bonjour64.msi) installation failed with exit code $($process.ExitCode)."
+            # Output the log file content for debugging
+            if (Test-Path $logPath) {
+              echo "--- Start Bonjour Runtime Install Log ---"
+              Get-Content $logPath | ForEach-Object { echo $_ }
+              echo "--- End Bonjour Runtime Install Log ---"
+            }
+            exit 1
+          }
+          echo "Bonjour Runtime installation completed (Exit Code: $($process.ExitCode)). Log: $logPath"
+
+      - name: 'STEP: Install Bonjour SDK (64-bit)'
+        shell: pwsh
+        run: |
+          echo "Installing Bonjour SDK (BonjourSDK64.msi) silently with verbose logging..."
+          $msiPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "BonjourSDK64.msi"
+          $logPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "bonjoursdk64_install.log"
+          $arguments = "/i `"$msiPath`" /qn /norestart /L*v `"$logPath`""
+          $process = Start-Process msiexec -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0 -and $process.ExitCode -ne 3010) { # 3010 = Success, Reboot Required
+            echo "::error::Bonjour SDK (BonjourSDK64.msi) installation failed with exit code $($process.ExitCode)."
+            # Output the log file content for debugging
+            if (Test-Path $logPath) {
+              echo "--- Start Bonjour SDK Install Log ---"
+              Get-Content $logPath | ForEach-Object { echo $_ }
+              echo "--- End Bonjour SDK Install Log ---"
+            }
+            exit 1
+          }
+          echo "Bonjour SDK installation completed (Exit Code: $($process.ExitCode)). Log: $logPath"
 
       - name: 'START: Setup MSYS2'
         uses: msys2/setup-msys2@v2
@@ -114,16 +135,16 @@ jobs:
           set -eo pipefail
 
           echo "--- (2) Cloning shairport-sync repository ---"
-          git clone https://github.com/mikebrady/shairport-sync.git
-          cd shairport-sync
+          # Clone outside of the current directory to avoid potential conflicts if workspace isn't clean
+          git clone https://github.com/mikebrady/shairport-sync.git ../shairport-sync-source
+          cd ../shairport-sync-source
 
           echo "--- (3) Running autoreconf ---"
           autoreconf -fi
 
           echo "--- (4) Configuring shairport-sync build ---"
-          # Point CPPFLAGS to SDK Include directory
-          # Point LDFLAGS to SDK Lib directory (use amd64 for 64-bit build)
-          # Translate Windows paths to MSYS2 paths (/c/Program Files/...)
+          # Default SDK install path: C:\Program Files\Bonjour SDK
+          # MSYS2 path translation: /c/Program Files/Bonjour SDK
           PKG_CONFIG_PATH=/mingw64/lib/pkgconfig \
           CPPFLAGS="-I'/c/Program Files/Bonjour SDK/Include'" \
           LDFLAGS="-L'/c/Program Files/Bonjour SDK/Lib/amd64'" \
@@ -143,6 +164,7 @@ jobs:
           make || { echo "::error::Make failed"; exit 1; }
 
           echo "--- (6) Installing to /mingw64/bin ---"
+          # This copies the compiled exe and potentially libs to the MSYS2 environment's bin folder
           make install || { echo "::error::Make install failed"; exit 1; }
 
           echo "--- Shairport-sync build complete ---"
@@ -151,21 +173,19 @@ jobs:
         shell: pwsh
         run: |
           echo "--- Starting artifact pruning ---"
-          # Ensure dll-libs-list.txt exists and is correct for shairport-sync dependencies
-          $dllListPath = "dll-libs-list.txt" # Assuming it's at the root
+          $dllListPath = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "dll-libs-list.txt" # Ensure correct path
           if (-not (Test-Path -Path $dllListPath -PathType Leaf)) {
             echo "::error::$dllListPath not found or is not a file!"
             exit 1
           }
           $dllList = Get-Content -Path $dllListPath
+          # Source is where 'make install' put the files
           $msysBinPath = "$env:GITHUB_WORKSPACE\msys64\mingw64\bin"
-          $destPath = "$env:GITHUB_WORKSPACE\build"
+          $destPath = "$env:GITHUB_WORKSPACE\build" # Destination for the final bundle
 
-          # Ensure the build directory exists
           New-Item -ItemType Directory -Force -Path $destPath
           echo "Created/Ensured build directory exists at $destPath"
 
-          # Copy shairport-sync.exe itself
           $shairportExeSource = Join-Path $msysBinPath "shairport-sync.exe"
           if (Test-Path $shairportExeSource) {
             echo "Copying shairport-sync.exe to $destPath"
@@ -175,19 +195,15 @@ jobs:
              exit 1
           }
 
-          # Copy dependent DLLs from the list
           foreach ($file in $dllList) {
             $trimmedFile = $file.Trim()
             if ([string]::IsNullOrWhiteSpace($trimmedFile) -or $trimmedFile.StartsWith("#")) {
               continue
             }
-
             $sourceFile = Join-Path $msysBinPath $trimmedFile
-            $foundFile = Get-Item $sourceFile -ErrorAction SilentlyContinue
-
-            if ($foundFile) {
-              echo "Copying $($foundFile.Name) to $destPath"
-              Copy-Item -Path $foundFile.FullName -Destination $destPath
+            if (Test-Path $sourceFile) {
+              echo "Copying $($trimmedFile) to $destPath"
+              Copy-Item -Path $sourceFile -Destination $destPath
             } else {
               echo "::error::Required dependency DLL '$trimmedFile' not found in $msysBinPath"
               exit 1
@@ -210,17 +226,19 @@ jobs:
       - name: 'START: Build the Python wrapper'
         run: |
           echo "--- Running PyInstaller... ---"
+          # Ensure the tray.py script is in the expected 'tray' subfolder relative to workspace root
           pyinstaller --onefile --windowed --name shairport-sync-windows tray/tray.py || { echo "::error::PyInstaller failed"; exit 1; }
-          # pyinstaller --onefile --windowed --icon=icon.ico --name shairport-sync-windows tray/tray.py
-          # copy icon.ico dist\icon.ico
           echo "--- PyInstaller build complete ---"
+          # Copy the built python exe to the 'build' dir for Inno Setup
+          echo "Copying Python wrapper executable to build directory..."
+          Copy-Item -Path "dist/shairport-sync-windows.exe" -Destination "$env:GITHUB_WORKSPACE\build\"
 
       # --- Phase 3: Inno Setup Installer ---
       - name: 'START: Compile the installer with Inno Setup'
         shell: pwsh
         run: |
           echo "--- Running Inno Setup Compiler (iscc)... ---"
-          # Ensure the script.iss file references files copied to the 'build' directory correctly
+          # Make sure inno-setup/script.iss correctly references files in the 'build' directory
           iscc "inno-setup/script.iss" || { echo "::error::Inno Setup compilation failed"; exit 1; }
           echo "--- Inno Setup compilation complete ---"
 
@@ -229,4 +247,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: shairport-sync-windows
+          # Ensure the output path configured in script.iss matches here
           path: inno-setup/Output/shairport-sync-windows-setup.exe
